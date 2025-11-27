@@ -12,6 +12,23 @@ npm run test         # execute deterministic Vitest suite
 
 The dev server listens on `PORT` (default `3000`). Health probes live at `GET /health`, while `GET /games/:id` exposes raw game state for debugging only.
 
+### Debug mode
+
+To make local UI development easier, the server exposes a small set of host-only
+debug actions when started with:
+
+```bash
+WEREWOLF_DEBUG=1 npm run dev
+```
+
+In debug mode the host can:
+
+- Auto-fill the lobby with bot players via `DEBUG_POPULATE_LOBBY`.
+- Force the current phase timeout to fire via `DEBUG_FORCE_TIMEOUT`, exercising the
+  NIGHT → DAY / TRIAL → VERDICT / VERDICT → NIGHT loop without eight real clients.
+
+These actions are rejected with a `DEBUG_DISABLED` error when `WEREWOLF_DEBUG` is not set.
+
 ## Architecture at a Glance
 
 - `src/engine/` – Pure domain logic and transitions. No I/O, no clocks; callers pass timestamps/RNG explicitly.
