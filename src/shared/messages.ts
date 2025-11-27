@@ -15,7 +15,9 @@ export type ChatChannel = "LOBBY" | "DAY" | "NIGHT_TRAITORS" | "TRIAL" | "GAME_O
 /**
  * All actions that a client may issue over the WebSocket channel.
  * Each variant is only valid during certain phases and the server enforces that
- * the authenticated socket/player IDs match the payload.
+ * the authenticated socket/player IDs match the payload. Some variants are
+ * debug-only helpers and are only honored when WEREWOLF_DEBUG=1 on the server
+ * and invoked by the current host.
  */
 export type ClientMessage =
   /** Create a fresh lobby and seed a host player (lobby only). */
@@ -38,7 +40,36 @@ export type ClientMessage =
    */
   | { type: "CHAT"; payload: { gameId: string; playerId: string; text: string } }
   /** Living player verdict vote (HANG/SPARE) during DAY_VERDICT. */
-  | { type: "DAY_VERDICT_VOTE"; payload: { gameId: string; playerId: string; choice: VerdictChoice } };
+  | { type: "DAY_VERDICT_VOTE"; payload: { gameId: string; playerId: string; choice: VerdictChoice } }
+  /**
+   * DEBUG ONLY: host-only helper to seed bot players into the lobby so a single
+   * developer can exercise the UI without eight real humans.
+   *
+   * - Only honored when WEREWOLF_DEBUG=1 on the server.
+   * - Only valid while phase === "LOBBY".
+   * - Only the host may call it.
+   * - totalPlayers is the desired final lobby size (including the host).
+   */
+  | {
+      type: "DEBUG_POPULATE_LOBBY";
+      payload: { gameId: string; playerId: string; totalPlayers?: number };
+    }
+  /**
+   * DEBUG ONLY: simulate the phase timer firing immediately for the current game.
+   *
+   * This calls the same logic as PhaseTimer.onTimeout:
+   * - NIGHT → resolveNight
+   * - DAY_DISCUSSION → skipDayToNight
+   * - TRIAL → startDayVerdict
+   * - DAY_VERDICT → resolveDayVerdict
+   *
+   * - Only honored when WEREWOLF_DEBUG=1 on the server.
+   * - Only the host may call it.
+   */
+  | {
+      type: "DEBUG_FORCE_TIMEOUT";
+      payload: { gameId: string; playerId: string };
+    };
 
 /** Public info exposed to every viewer, with all secret info stripped. */
 export interface PublicPlayerView {

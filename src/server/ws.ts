@@ -6,6 +6,9 @@ import { GameRuleError, GameState, VerdictChoice } from "../engine/types";
 import * as transitions from "../engine/transitions";
 import { GameStore } from "./store";
 import { resolveChatRoute } from "./chat";
+import { populateLobbyWithBots } from "./debug";
+
+const DEBUG_MODE = process.env.WEREWOLF_DEBUG === "1";
 
 interface ConnectionContext {
   accountId: string;
@@ -110,6 +113,12 @@ export class WebSocketGateway {
         case "DAY_VERDICT_VOTE":
           this.handleVerdictVote(socket, msg.payload);
           break;
+        case "DEBUG_POPULATE_LOBBY":
+          this.handleDebugPopulateLobby(socket, msg.payload);
+          break;
+        case "DEBUG_FORCE_TIMEOUT":
+          this.handleDebugForceTimeout(socket, msg.payload);
+          break;
         default:
           this.sendError(socket, "INVALID_TYPE", "Unknown message type");
       }
@@ -143,6 +152,28 @@ export class WebSocketGateway {
     if (playerId && ctx.playerId !== playerId) {
       throw new GameRuleError("NOT_YOU", "Cannot act on behalf of another player");
     }
+  }
+
+  /**
+   * Ensures debug mode is enabled, the game exists, and the caller is the host.
+   * Returns the current GameState when all checks succeed.
+   */
+  private requireDebugHost(ctx: ConnectionContext, gameId: string): GameState {
+    if (!DEBUG_MODE) {
+      throw new GameRuleError("DEBUG_DISABLED", "Debug actions are disabled on this server");
+    }
+
+    const game = this.store.get(gameId);
+    if (!game) {
+      throw new GameRuleError("GAME_NOT_FOUND", "Game not found");
+    }
+
+    const host = game.players.find(p => p.isHost);
+    if (!host || host.playerId !== ctx.playerId) {
+      throw new GameRuleError("NOT_HOST", "Only the host may use debug actions");
+    }
+
+    return game;
   }
 
   /** Adds a socket to the per-game room list and stores its context. */
@@ -250,6 +281,46 @@ export class WebSocketGateway {
     } catch (err) {
       console.error("Phase timeout error", err);
     }
+  }
+
+  /**
+   * DEBUG_POPULATE_LOBBY → host-only helper to auto-fill the lobby with bots.
+   */
+  private handleDebugPopulateLobby(
+    socket: WebSocket,
+    payload: { gameId: string; playerId: string; totalPlayers?: number }
+  ): void {
+    const ctx = this.requireContext(socket);
+    this.requireValidAction(ctx, payload.gameId, payload.playerId);
+
+    // Throws if debug disabled or caller is not host.
+    this.requireDebugHost(ctx, payload.gameId);
+
+    const updated = this.store.withGame(payload.gameId, current =>
+      populateLobbyWithBots(current, payload.totalPlayers)
+    );
+
+    this.broadcastState(updated);
+  }
+
+  /**
+   * DEBUG_FORCE_TIMEOUT → pretend the phase timer fired right now.
+   * Uses the same logic as onPhaseTimeout, but triggered manually.
+   */
+  private handleDebugForceTimeout(
+    socket: WebSocket,
+    payload: { gameId: string; playerId: string }
+  ): void {
+    const ctx = this.requireContext(socket);
+    this.requireValidAction(ctx, payload.gameId, payload.playerId);
+
+    const game = this.requireDebugHost(ctx, payload.gameId);
+
+    if (!["NIGHT", "DAY_DISCUSSION", "TRIAL", "DAY_VERDICT"].includes(game.phase)) {
+      throw new GameRuleError("INVALID_DEBUG", `No timeout behavior for phase ${game.phase}`);
+    }
+
+    this.onPhaseTimeout(payload.gameId);
   }
 
   /**
